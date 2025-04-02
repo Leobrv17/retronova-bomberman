@@ -1,14 +1,19 @@
 import pygame
 from player import Player
+from ai_player import AIPlayer
 from contantes import *
 import random
 from explosion import Explosion
 
+
 class Bomberman:
-    def __init__(self, screen):
+    def __init__(self, screen, two_players=True):
         # Initialisation de l'affichage
         self.screen = screen
         pygame.display.set_caption("Bomberman")
+
+        # Mode de jeu (True: 2 joueurs + 1 IA, False: 1 joueur + 2 IA)
+        self.two_players = two_players
 
         # Calculer le décalage pour centrer le jeu sur l'écran
         self.offset_x = (SCREEN_WIDTH - WIDTH) // 2
@@ -23,16 +28,44 @@ class Bomberman:
         self.grid = self.create_grid()
         self.bombs = []
         self.explosions = []
-        self.players = [
-            Player(1, 1, RED, pygame.K_z, pygame.K_s, pygame.K_q, pygame.K_d, pygame.K_e),
-            Player(GRID_WIDTH - 2, GRID_HEIGHT - 2, BLUE, pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT,
-                   pygame.K_SPACE)
-        ]
+
+        # Création des joueurs selon le mode de jeu
+        self.create_players()
+
+        # Liste combinée de toutes les entités pour simplifier le code
+        self.all_entities = self.players + self.ai_players
 
         # État du jeu
         self.running = True
         self.game_over = False
         self.game_time = 0  # Temps de jeu en frames
+        self.target_update_timer = 0  # Timer pour mettre à jour les cibles des IA
+
+    def create_players(self):
+        # Liste pour stocker tous les participants (joueurs et IA)
+        self.players = []
+        self.ai_players = []
+
+        # Créer les joueurs humains
+        if self.two_players:
+            # Mode 2 joueurs: Joueur 1 (Rouge) et Joueur 2 (Bleu)
+            self.players = [
+                Player(1, 1, RED, pygame.K_z, pygame.K_s, pygame.K_q, pygame.K_d, pygame.K_e),
+                Player(GRID_WIDTH - 2, GRID_HEIGHT - 2, BLUE, pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT,
+                       pygame.K_SPACE)
+            ]
+            # Ajouter 1 IA (Violet)
+            ai = AIPlayer(GRID_WIDTH // 2, GRID_HEIGHT // 2, PURPLE)
+            self.ai_players.append(ai)
+        else:
+            # Mode 1 joueur: Seulement Joueur 1 (Rouge)
+            self.players = [
+                Player(1, 1, RED, pygame.K_z, pygame.K_s, pygame.K_q, pygame.K_d, pygame.K_e)
+            ]
+            # Ajouter 2 IA (Bleu et Violet)
+            ai1 = AIPlayer(GRID_WIDTH - 2, 1, BLUE, self.players[0])  # AI 1 cible le joueur
+            ai2 = AIPlayer(1, GRID_HEIGHT - 2, PURPLE, self.players[0])  # AI 2 cible aussi le joueur
+            self.ai_players.extend([ai1, ai2])
 
     def load_images(self):
         # Créer un dictionnaire pour stocker les images
@@ -105,7 +138,8 @@ class Bomberman:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
                 if event.key == pygame.K_r:
-                    self.__init__()  # Redémarrer le jeu
+                    # Réinitialiser avec le même mode de jeu
+                    self.__init__(self.screen, self.two_players)
 
         # Prise en compte des entrées des joueurs
         if not self.game_over:
@@ -121,16 +155,28 @@ class Bomberman:
         # Incrémenter le temps de jeu
         self.game_time += 1
 
-        # Mise à jour des joueurs
-        for player in self.players:
-            if player.alive:
-                player.update(self)
-                # Augmenter le temps de survie pour les joueurs en vie
-                player.survival_time += 1
+        # Mise à jour des cibles des IA périodiquement
+        self.target_update_timer += 1
+        if self.target_update_timer >= FPS * 2:  # Toutes les 2 secondes
+            self.update_ai_targets()
+            self.target_update_timer = 0
+
+        # Mise à jour de toutes les entités (joueurs et IA)
+        for entity in self.all_entities:
+            if entity.alive:
+                # Pour les joueurs humains
+                if entity in self.players:
+                    entity.update(self)
+                # Pour les IA
+                else:
+                    entity.update(self)
+
+                # Augmenter le temps de survie pour les entités en vie
+                entity.survival_time += 1
 
                 # Attribuer des points de survie (1 point par seconde)
                 if self.game_time % FPS == 0:  # Toutes les secondes
-                    player.score += 1
+                    entity.score += 1
 
         # Mise à jour des bombes
         self.update_bombs()
@@ -138,15 +184,18 @@ class Bomberman:
         # Mise à jour des explosions
         self.update_explosions()
 
-        # Vérification des conditions de fin de partie
-        alive_count = sum(1 for player in self.players if player.alive)
-        if alive_count <= 1:
-            self.game_over = True
+    def update_ai_targets(self):
+        """Met à jour les cibles des IA pour qu'elles attaquent les joueurs humains."""
+        # S'assurer que les IA ciblent les joueurs humains vivants
+        living_players = [p for p in self.players if p.alive]
 
-            # Bonus pour le gagnant
-            for player in self.players:
-                if player.alive:
-                    player.score += 10000  # Bonus important pour avoir gagné
+        if not living_players:
+            return  # Pas de joueurs humains vivants à cibler
+
+        for ai in self.ai_players:
+            if ai.alive:
+                # Choisir un joueur vivant aléatoirement comme cible
+                ai.target_player = random.choice(living_players)
 
     # ----------------------------------------
     # MÉTHODES DE GESTION DES BOMBES ET EXPLOSIONS
@@ -154,6 +203,7 @@ class Bomberman:
     def update_bombs(self):
         # Mise à jour des bombes et détection des explosions
         for bomb in self.bombs[:]:
+            bomb.update()  # Ajout de l'appel à update pour gérer la propriété just_placed
             bomb.timer -= 1
             if bomb.timer <= 0:
                 self.explode_bomb(bomb)
@@ -223,16 +273,19 @@ class Bomberman:
         # Ajouter une explosion à la liste
         self.explosions.append(Explosion(x, y, duration))
 
-        # Vérifier si des joueurs sont touchés par l'explosion
-        for player in self.players:
-            if player.alive and player.grid_x == x and player.grid_y == y:
-                player.alive = False
+        # Vérifier si des entités (joueurs ou IA) sont touchées par l'explosion
+        for entity in self.all_entities:
+            if entity.alive and entity.grid_x == x and entity.grid_y == y:
+                entity.alive = False
 
-                # Trouver quel joueur a posé la bombe qui a tué ce joueur
+                # Trouver quel joueur/IA a posé la bombe qui a tué cette entité
+                killer_found = False
                 for bomb in self.bombs:
-                    if bomb.owner and bomb.owner != player:  # Ne pas attribuer de points pour suicide
+                    if bomb.owner and bomb.owner != entity:  # Ne pas attribuer de points pour suicide
                         # Points pour avoir éliminé un adversaire
                         bomb.owner.score += 5000  # Bonus important pour avoir éliminé un adversaire
+                        killer_found = True
+                        break
 
     def update_explosions(self):
         # Mise à jour des explosions et suppression de celles qui sont terminées
@@ -240,6 +293,21 @@ class Bomberman:
             explosion.update()
             if explosion.is_finished():
                 self.explosions.remove(explosion)
+
+        # Vérifier si la partie doit se terminer
+        human_alive = sum(1 for p in self.players if p.alive)
+        ai_alive = sum(1 for p in self.ai_players if p.alive)
+
+        # Conditions de fin de partie
+        if human_alive == 0:
+            # Tous les joueurs humains sont morts
+            self.game_over = True
+        elif self.two_players and human_alive + ai_alive <= 1:
+            # Mode 2 joueurs: un seul participant reste
+            self.game_over = True
+        elif not self.two_players and human_alive == 1 and ai_alive == 0:
+            # Mode 1 joueur: le joueur est vivant et toutes les IA sont mortes
+            self.game_over = True
 
     # ----------------------------------------
     # MÉTHODES D'AFFICHAGE
@@ -259,10 +327,10 @@ class Bomberman:
         for explosion in self.explosions:
             explosion.draw(self.screen, self.offset_x, self.offset_y)
 
-        # Dessiner les joueurs
-        for player in self.players:
-            if player.alive:
-                player.draw(self.screen, self.offset_x, self.offset_y)
+        # Dessiner toutes les entités (joueurs et IA)
+        for entity in self.all_entities:
+            if entity.alive:
+                entity.draw(self.screen, self.offset_x, self.offset_y)
 
         # Afficher l'interface utilisateur
         self.draw_ui()
@@ -320,15 +388,36 @@ class Bomberman:
             time_rect = time_surface.get_rect(center=(SCREEN_WIDTH // 2, 20))
             self.screen.blit(time_surface, time_rect)
 
-            # Afficher l'information sur les bonus et scores de chaque joueur
+            # Afficher l'information sur les bonus et scores de chaque joueur/IA
+            y_offset = 10
+            x_left = 10
+            x_right = SCREEN_WIDTH - 10
+
+            # Joueur 1 (toujours présent)
             player1_info = f"J1: B:{self.players[0].max_bombs} F:{self.players[0].bomb_power} S:{self.players[0].speed} Score:{self.players[0].score}"
-            player2_info = f"J2: B:{self.players[1].max_bombs} F:{self.players[1].bomb_power} S:{self.players[1].speed} Score:{self.players[1].score}"
-
             player1_text = self.font.render(player1_info, True, RED)
-            player2_text = self.font.render(player2_info, True, BLUE)
+            self.screen.blit(player1_text, (x_left, y_offset))
 
-            self.screen.blit(player1_text, (10, 10))
-            self.screen.blit(player2_text, (SCREEN_WIDTH - player2_text.get_width() - 10, 10))
+            # En mode 2 joueurs
+            if self.two_players:
+                # Joueur 2
+                player2_info = f"J2: B:{self.players[1].max_bombs} F:{self.players[1].bomb_power} S:{self.players[1].speed} Score:{self.players[1].score}"
+                player2_text = self.font.render(player2_info, True, BLUE)
+                self.screen.blit(player2_text, (x_right - player2_text.get_width(), y_offset))
+
+                # IA (en violet)
+                ai_info = f"IA: B:{self.ai_players[0].max_bombs} F:{self.ai_players[0].bomb_power} S:{self.ai_players[0].speed} Score:{self.ai_players[0].score}"
+                ai_text = self.font.render(ai_info, True, PURPLE)
+                self.screen.blit(ai_text, (SCREEN_WIDTH // 2 - ai_text.get_width() // 2, y_offset + 30))
+            else:
+                # Mode 1 joueur: 2 IA (Bleu et Violet)
+                ai1_info = f"IA1: B:{self.ai_players[0].max_bombs} F:{self.ai_players[0].bomb_power} S:{self.ai_players[0].speed} Score:{self.ai_players[0].score}"
+                ai1_text = self.font.render(ai1_info, True, BLUE)
+                self.screen.blit(ai1_text, (x_right - ai1_text.get_width(), y_offset))
+
+                ai2_info = f"IA2: B:{self.ai_players[1].max_bombs} F:{self.ai_players[1].bomb_power} S:{self.ai_players[1].speed} Score:{self.ai_players[1].score}"
+                ai2_text = self.font.render(ai2_info, True, PURPLE)
+                self.screen.blit(ai2_text, (SCREEN_WIDTH // 2 - ai2_text.get_width() // 2, y_offset + 30))
 
         # Légende des bonus en bas de l'écran
         legend_font = pygame.font.SysFont('Arial', int(TILE_SIZE * 0.4))
@@ -347,17 +436,38 @@ class Bomberman:
     def draw_game_over(self):
         # Déterminer le vainqueur
         winner_text = "Match nul!"
+        winner_type = "none"  # "player" ou "ai"
         winner_index = -1
+
+        all_participants = []
+
+        # Ajouter les joueurs avec leur type
         for i, player in enumerate(self.players):
-            if player.alive:
-                winner_text = f"Joueur {i + 1} gagne!"
-                winner_index = i
+            all_participants.append({"entity": player, "type": "player", "index": i, "display_index": i + 1})
+
+        # Ajouter les IA avec leur type
+        for i, ai in enumerate(self.ai_players):
+            all_participants.append({"entity": ai, "type": "ai", "index": i, "display_index": i + 1})
+
+        # Trouver le vainqueur
+        for participant in all_participants:
+            if participant["entity"].alive:
+                if participant["type"] == "player":
+                    winner_text = f"Joueur {participant['display_index']} gagne!"
+                    winner_type = "player"
+                else:
+                    winner_text = f"IA {participant['display_index']} gagne!"
+                    winner_type = "ai"
+                winner_index = participant["index"]
+                break
 
         text_surface = self.font.render(winner_text, True, WHITE)
         text_rect = text_surface.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - TILE_SIZE * 2))
 
         # Afficher les scores finaux
         scores_text = []
+
+        # Scores des joueurs humains
         for i, player in enumerate(self.players):
             color = RED if i == 0 else BLUE
             stats = f"Joueur {i + 1}: {player.score} points"
@@ -366,7 +476,19 @@ class Bomberman:
             scores_text.append(self.font.render(details, True, color))
 
             # Ajouter une couronne au vainqueur
-            if winner_index == i:
+            if winner_type == "player" and winner_index == i:
+                scores_text[len(scores_text) - 2] = self.font.render(f"👑 {stats}", True, color)
+
+        # Scores des IA
+        for i, ai in enumerate(self.ai_players):
+            color = BLUE if self.two_players == False and i == 0 else PURPLE
+            stats = f"IA {i + 1}: {ai.score} points"
+            details = f"(Blocs: {ai.blocks_destroyed}, Power-ups: {ai.powerups_collected}, Temps: {ai.survival_time // FPS}s)"
+            scores_text.append(self.font.render(stats, True, color))
+            scores_text.append(self.font.render(details, True, color))
+
+            # Ajouter une couronne au vainqueur
+            if winner_type == "ai" and winner_index == i:
                 scores_text[len(scores_text) - 2] = self.font.render(f"👑 {stats}", True, color)
 
         # Positionner les textes
