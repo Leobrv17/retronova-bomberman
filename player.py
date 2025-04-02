@@ -75,11 +75,18 @@ class Player:
 
         # Vérifier s'il y a une bombe
         if tile_type == TileType.BOMB:
-            # On autorise le joueur à marcher sur sa propre bombe qu'il vient de poser
-            # mais pas sur les autres bombes
+            # Vérifier si on est déjà sur une bombe (pour pouvoir en sortir)
+            current_on_bomb = game.grid[self.grid_y][self.grid_x] == TileType.BOMB
+
+            # Si on est sur une bombe, on peut se déplacer vers une autre bombe ou une case vide
+            if current_on_bomb:
+                return True
+
+            # Sinon, on ne peut pas marcher sur une bombe (sauf si on vient de la poser)
             for bomb in game.bombs:
-                if bomb.x == grid_x and bomb.y == grid_y and not bomb.just_placed:
-                    return False
+                if bomb.x == grid_x and bomb.y == grid_y and bomb.just_placed and bomb.owner == self:
+                    return True
+            return False
 
         return True
 

@@ -46,26 +46,59 @@ class Bomberman:
         self.players = []
         self.ai_players = []
 
-        # Créer les joueurs humains
+        # Positions des angles du plateau (en excluant les murs de bordure)
+        corner_positions = [
+            (1, 1),  # Coin supérieur gauche
+            (GRID_WIDTH - 2, 1),  # Coin supérieur droit
+            (1, GRID_HEIGHT - 2),  # Coin inférieur gauche
+            (GRID_WIDTH - 2, GRID_HEIGHT - 2)  # Coin inférieur droit
+        ]
+
+        # S'assurer que les coins sont libres pour les joueurs et les IA
+        self.prepare_corners(corner_positions)
+
         if self.two_players:
             # Mode 2 joueurs: Joueur 1 (Rouge) et Joueur 2 (Bleu)
             self.players = [
-                Player(1, 1, RED, pygame.K_z, pygame.K_s, pygame.K_q, pygame.K_d, pygame.K_e),
-                Player(GRID_WIDTH - 2, GRID_HEIGHT - 2, BLUE, pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT,
-                       pygame.K_SPACE)
+                Player(corner_positions[0][0], corner_positions[0][1], RED, pygame.K_z, pygame.K_s, pygame.K_q,
+                       pygame.K_d, pygame.K_e),
+                Player(corner_positions[3][0], corner_positions[3][1], BLUE, pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT,
+                       pygame.K_RIGHT, pygame.K_SPACE)
             ]
-            # Ajouter 1 IA (Violet)
-            ai = AIPlayer(GRID_WIDTH // 2, GRID_HEIGHT // 2, PURPLE)
+            # Ajouter 1 IA (Violet) dans un autre coin
+            ai = AIPlayer(corner_positions[1][0], corner_positions[1][1], PURPLE)
             self.ai_players.append(ai)
         else:
             # Mode 1 joueur: Seulement Joueur 1 (Rouge)
             self.players = [
-                Player(1, 1, RED, pygame.K_z, pygame.K_s, pygame.K_q, pygame.K_d, pygame.K_e)
+                Player(corner_positions[0][0], corner_positions[0][1], RED, pygame.K_z, pygame.K_s, pygame.K_q,
+                       pygame.K_d, pygame.K_e)
             ]
-            # Ajouter 2 IA (Bleu et Violet)
-            ai1 = AIPlayer(GRID_WIDTH - 2, 1, BLUE, self.players[0])  # AI 1 cible le joueur
-            ai2 = AIPlayer(1, GRID_HEIGHT - 2, PURPLE, self.players[0])  # AI 2 cible aussi le joueur
+            # Ajouter 2 IA (Bleu et Violet) dans d'autres coins
+            ai1 = AIPlayer(corner_positions[1][0], corner_positions[1][1], BLUE, self.players[0])
+            ai2 = AIPlayer(corner_positions[2][0], corner_positions[2][1], PURPLE, self.players[0])
             self.ai_players.extend([ai1, ai2])
+
+    def prepare_corners(self, corner_positions):
+        """Prépare les coins du plateau pour que les joueurs et IA puissent s'y positionner"""
+        for x, y in corner_positions:
+            # Rendre la case du coin libre
+            self.grid[y][x] = TileType.EMPTY
+
+            # Rendre les deux cases adjacentes libres (horizontale et verticale)
+            adjacent_positions = [
+                (x + 1, y),  # Droite
+                (x, y + 1),  # Bas
+                (x - 1, y),  # Gauche
+                (x, y - 1)  # Haut
+            ]
+
+            for adj_x, adj_y in adjacent_positions:
+                # Vérifier que la position est dans la grille
+                if 0 <= adj_x < GRID_WIDTH and 0 <= adj_y < GRID_HEIGHT:
+                    # Ne pas toucher aux murs fixes (TileType.WALL), seulement aux blocs destructibles
+                    if self.grid[adj_y][adj_x] != TileType.WALL:
+                        self.grid[adj_y][adj_x] = TileType.EMPTY
 
     def load_images(self):
         # Créer un dictionnaire pour stocker les images
@@ -109,9 +142,6 @@ class Bomberman:
         for x in range(GRID_WIDTH):
             for y in range(GRID_HEIGHT):
                 if grid[y][x] == TileType.EMPTY:
-                    # Laisse des espaces libres pour les joueurs dans les coins
-                    if (x <= 2 and y <= 2) or (x >= GRID_WIDTH - 3 and y >= GRID_HEIGHT - 3):
-                        continue
                     # 40% de chance d'ajouter un bloc destructible
                     if random.random() < 0.4:
                         grid[y][x] = TileType.BLOCK

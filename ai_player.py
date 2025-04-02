@@ -176,7 +176,14 @@ class AIPlayer:
 
         # Vérifier s'il y a une bombe
         if tile_type == TileType.BOMB:
-            # Éviter les bombes
+            # Vérifier si on est déjà sur une bombe (pour pouvoir en sortir)
+            current_on_bomb = game.grid[self.grid_y][self.grid_x] == TileType.BOMB
+
+            # Si on est sur une bombe, on peut se déplacer vers une autre bombe ou une case vide
+            if current_on_bomb:
+                return True
+
+            # Sinon, l'IA évite les bombes
             return False
 
         # Vérifier s'il y a une explosion
