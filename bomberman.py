@@ -305,17 +305,34 @@ class Bomberman:
 
         # Vérifier si des entités (joueurs ou IA) sont touchées par l'explosion
         for entity in self.all_entities:
-            if entity.alive and entity.grid_x == x and entity.grid_y == y:
-                entity.alive = False
+            if entity.alive:
+                # Vérifier si le centre de l'entité est touché (comme avant)
+                if entity.grid_x == x and entity.grid_y == y:
+                    entity.alive = False
+                    self.attribute_kill_points(entity)
+                else:
+                    # NOUVEAU: Vérifier si le cercle de collision de l'entité est touché par l'explosion
+                    # Calculer la distance entre le centre de l'entité et le centre de l'explosion
+                    dist_x = abs(entity.x / TILE_SIZE - x)
+                    dist_y = abs(entity.y / TILE_SIZE - y)
 
-                # Trouver quel joueur/IA a posé la bombe qui a tué cette entité
-                killer_found = False
-                for bomb in self.bombs:
-                    if bomb.owner and bomb.owner != entity:  # Ne pas attribuer de points pour suicide
-                        # Points pour avoir éliminé un adversaire
-                        bomb.owner.score += 5000  # Bonus important pour avoir éliminé un adversaire
-                        killer_found = True
-                        break
+                    # Si l'entité est sur la même ligne ou colonne que l'explosion
+                    if (dist_x < 0.5 and entity.grid_y == y) or (dist_y < 0.5 and entity.grid_x == x):
+                        # Calculer le rayon normalisé (en unités de grille)
+                        normalized_radius = entity.radius / TILE_SIZE
+
+                        # Si le bord du cercle de l'entité chevauche l'explosion
+                        if (dist_x <= normalized_radius or dist_y <= normalized_radius):
+                            entity.alive = False
+                            self.attribute_kill_points(entity)
+
+    def attribute_kill_points(self, killed_entity):
+        # Trouver quel joueur/IA a posé la bombe qui a tué cette entité
+        for bomb in self.bombs:
+            if bomb.owner and bomb.owner != killed_entity:  # Ne pas attribuer de points pour suicide
+                # Points pour avoir éliminé un adversaire
+                bomb.owner.score += 5000  # Bonus important pour avoir éliminé un adversaire
+                return
 
     def update_explosions(self):
         # Mise à jour des explosions et suppression de celles qui sont terminées

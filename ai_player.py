@@ -1,5 +1,7 @@
 import random
 from contantes import *
+from bomb import Bomb
+from ai_strategies import AIStrategies
 
 
 class AIPlayer:
@@ -36,6 +38,7 @@ class AIPlayer:
         self.last_positions = []
         self.bomb_cooldown = random.randint(20, 60)  # Délai plus court
         self.danger_awareness = 0.95  # Niveau très élevé de conscience du danger
+        self.game_time = 0  # Initialisation du temps de jeu
 
         # Nouvelles variables stratégiques
         self.strategy_mode = "hunt"  # "hunt", "collect", "trap", "escape"
@@ -46,6 +49,10 @@ class AIPlayer:
         self.map_knowledge = {}  # Connaissance de la carte
         self.trap_cooldown = 0  # Cooldown pour poser des pièges élaborés
         self.has_clear_path_to_safety = False  # Indique si l'IA a identifié un chemin clair vers la sécurité
+        self.strategy_timer = 0  # Initialiser le timer de stratégie
+
+        # Initialiser le module de stratégies
+        self.strategies = AIStrategies(self)
 
         # Créer une personnalité d'IA unique
         self.create_ai_personality()
@@ -140,12 +147,10 @@ class AIPlayer:
         # Décrémenter les cooldowns
         if self.trap_cooldown > 0:
             self.trap_cooldown -= 1
+        if self.bomb_cooldown > 0:
+            self.bomb_cooldown -= 1
 
         # Réévaluer périodiquement la stratégie (environ toutes les 3 secondes)
-        # Utiliser une approche basée sur les frames sans dépendre de game_time
-        if not hasattr(self, 'strategy_timer'):
-            self.strategy_timer = 0
-
         self.strategy_timer += 1
         if self.strategy_timer >= 180:  # Environ 3 secondes à 60 FPS
             self.reevaluate_strategy(game)
@@ -221,6 +226,40 @@ class AIPlayer:
         # Choisir la stratégie avec le score le plus élevé
         best_strategy = max(strategy_scores, key=strategy_scores.get)
         self.strategy_mode = best_strategy
+
+    def find_target_player(self, game):
+        """Trouve le joueur cible le plus approprié"""
+        # Si nous avons une cible spécifique et qu'elle est vivante, la prioriser
+        if self.target_player and self.target_player.alive:
+            return self.target_player
+
+        # Sinon, trouver le joueur vivant le plus proche
+        living_players = [p for p in game.players if p.alive]
+        if not living_players:
+            # S'il n'y a pas de joueurs vivants, chercher une IA vivante
+            living_ai = [ai for ai in game.ai_players if ai.alive and ai != self]
+            if not living_ai:
+                return None
+
+            # Trouver l'IA la plus proche
+            closest_ai = None
+            min_distance = float('inf')
+            for ai in living_ai:
+                distance = abs(ai.grid_x - self.grid_x) + abs(ai.grid_y - self.grid_y)
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_ai = ai
+            return closest_ai
+
+        # Trouver le joueur le plus proche
+        closest_player = None
+        min_distance = float('inf')
+        for player in living_players:
+            distance = abs(player.grid_x - self.grid_x) + abs(player.grid_y - self.grid_y)
+            if distance < min_distance:
+                min_distance = distance
+                closest_player = player
+        return closest_player
 
     def distance_to_nearest_powerup(self):
         """Calcule la distance jusqu'au power-up connu le plus proche"""
@@ -325,6 +364,78 @@ class AIPlayer:
 
         return best_position
 
+    def can_move_to(self, grid_x, grid_y, game):
+        """
+        Vérifie si l'IA peut se déplacer vers une position donnée
+        en tenant compte du rayon du cercle qui la représente
+        """
+        # Conversion du rayon en unités de grille
+        radius_in_grid = self.radius / TILE_SIZE
+
+        # Calculer les limites du cercle basées sur la nouvelle position potentielle
+        # Coordonnées du centre en unités de grille
+        center_x = grid_x + 0.5
+        center_y = grid_y + 0.5
+
+        # Points extrêmes du cercle (gauche, droite, haut, bas)
+        left_x = center_x - radius_in_grid
+        right_x = center_x + radius_in_grid
+        top_y = center_y - radius_in_grid
+        bottom_y = center_y + radius_in_grid
+
+        # Convertir les coordonnées en indices de grille
+        left_grid = int(left_x)
+        right_grid = int(right_x)
+        top_grid = int(top_y)
+        bottom_grid = int(bottom_y)
+
+        # Vérifier les cases qui pourraient être en collision avec le cercle
+        for check_x in range(left_grid, right_grid + 1):
+            for check_y in range(top_grid, bottom_grid + 1):
+                # Vérifier si la position est dans les limites de la grille
+                if 0 <= check_x < GRID_WIDTH and 0 <= check_y < GRID_HEIGHT:
+                    tile_type = game.grid[check_y][check_x]
+
+                    # Si c'est un mur ou un bloc, vérifier la collision précise
+                    if tile_type in [TileType.WALL, TileType.BLOCK]:
+                        # Centre de la case obstacle
+                        obstacle_center_x = check_x + 0.5
+                        obstacle_center_y = check_y + 0.5
+
+                        # Distance entre le centre du joueur et le centre de l'obstacle
+                        dx = abs(center_x - obstacle_center_x)
+                        dy = abs(center_y - obstacle_center_y)
+
+                        # Si le cercle du joueur touche la case obstacle
+                        # On vérifie la distance minimale entre le centre du cercle et le bord de la case
+
+                        # Pour les obstacles rectangulaires, on calcule la distance au bord le plus proche
+                        closest_x = max(check_x, min(center_x, check_x + 1))
+                        closest_y = max(check_y, min(center_y, check_y + 1))
+
+                        # Distance entre le centre du cercle et le point le plus proche du rectangle
+                        distance = ((center_x - closest_x) ** 2 + (center_y - closest_y) ** 2) ** 0.5
+
+                        # Si cette distance est inférieure au rayon, il y a collision
+                        if distance < radius_in_grid:
+                            return False
+
+        # Vérifier s'il y a une bombe
+        if game.grid[grid_y][grid_x] == TileType.BOMB:
+            # Vérifier si on est déjà sur une bombe (pour pouvoir en sortir)
+            current_on_bomb = game.grid[self.grid_y][self.grid_x] == TileType.BOMB
+
+            # Si on est sur une bombe, on peut se déplacer vers une autre bombe ou une case vide
+            if current_on_bomb:
+                return True
+
+            # Sinon, on ne peut pas marcher sur une bombe (sauf si on vient de la poser)
+            for bomb in game.bombs:
+                if bomb.x == grid_x and bomb.y == grid_y and bomb.just_placed and bomb.owner == self:
+                    return True
+            return False
+
+        return True
 
     def find_path_to_position(self, target_x, target_y, game, max_depth=8, avoid_danger=True):
         """Trouve un chemin vers une position cible"""
@@ -365,7 +476,6 @@ class AIPlayer:
         # Pas de chemin trouvé
         return None
 
-
     def find_path_to_target(self, target_x, target_y, game, max_depth=8):
         """Algorithme pathfinding amélioré avec différentes stratégies selon la personnalité"""
         # Utiliser le pathfinding de base avec des variantes selon la personnalité
@@ -403,10 +513,135 @@ class AIPlayer:
             else:
                 return self.find_path_to_position(target_x, target_y, game, max_depth, avoid_danger=False)
 
+    def collect_power_up(self, power_up_type):
+        """Collecte un power-up et met à jour les stats de l'IA"""
+        # Incrémenter le compteur de power-ups collectés
+        self.powerups_collected += 1
+
+        # Points de base pour avoir ramassé un power-up
+        self.score += 250
+
+        if power_up_type == TileType.POWER_UP_BOMB:
+            # Augmenter le nombre de bombes
+            self.max_bombs += 1
+        elif power_up_type == TileType.POWER_UP_FLAME:
+            # Augmenter la portée des explosions
+            self.bomb_power += 1
+        elif power_up_type == TileType.POWER_UP_SPEED:
+            # Augmenter la vitesse de déplacement
+            self.speed += 1
+
+    def place_bomb(self, game):
+        """Place une bombe si possible"""
+        if self.active_bombs < self.max_bombs and game.grid[self.grid_y][self.grid_x] == TileType.EMPTY:
+            game.grid[self.grid_y][self.grid_x] = TileType.BOMB
+            bomb = Bomb(self.grid_x, self.grid_y, self.bomb_power, self)
+            game.bombs.append(bomb)
+            self.active_bombs += 1
+            # Mémoriser où on a posé la bombe
+            self.previous_bomb_positions.append((self.grid_x, self.grid_y))
+            return True
+        return False
+
+    def find_escape_path(self, game):
+        """Trouve un chemin d'évacuation sûr depuis la position actuelle"""
+        # Simuler une bombe à notre position
+        simulated_bomb_power = self.bomb_power
+        danger_tiles = set()
+
+        # Calculer les cases qui seraient touchées
+        # Centre
+        danger_tiles.add((self.grid_x, self.grid_y))
+
+        # 4 directions
+        for dx, dy in [(0, -1), (1, 0), (0, 1), (-1, 0)]:
+            for i in range(1, simulated_bomb_power + 1):
+                nx, ny = self.grid_x + dx * i, self.grid_y + dy * i
+
+                # Vérifier si on est dans les limites
+                if 0 <= nx < GRID_WIDTH and 0 <= ny < GRID_HEIGHT:
+                    danger_tiles.add((nx, ny))
+                    # S'arrêter si on rencontre un mur ou un bloc
+                    if game.grid[ny][nx] in [TileType.WALL, TileType.BLOCK]:
+                        break
+
+        # Rechercher une case sûre accessible
+        for distance in range(1, 7):  # Distance Manhattan maximale
+            for tx in range(max(0, self.grid_x - distance), min(GRID_WIDTH, self.grid_x + distance + 1)):
+                for ty in range(max(0, self.grid_y - distance), min(GRID_HEIGHT, self.grid_y + distance + 1)):
+                    # Vérifier si c'est une case à exactement "distance" de Manhattan
+                    if abs(tx - self.grid_x) + abs(ty - self.grid_y) == distance:
+                        # Si la case n'est pas dans la zone de danger
+                        if (tx, ty) not in danger_tiles and self.can_move_to(tx, ty, game):
+                            # Vérifier si on peut y accéder
+                            path = self.find_path_to_position(tx, ty, game, max_depth=distance + 1, avoid_danger=True)
+                            if path:
+                                return path
+
+        return None
+
+    def manage_bombs(self, game):
+        """Gère la stratégie de bombe selon le contexte actuel"""
+        # Réduire le cooldown des bombes
+        if self.bomb_cooldown > 0:
+            return False
+
+        # Ne pas poser de bombe si on a atteint le maximum
+        if self.active_bombs >= self.max_bombs:
+            return False
+
+        target_player = self.find_target_player(game)
+        current_danger = self.calculate_danger_level(self.grid_x, self.grid_y, game)
+
+        # 1. Mode offensif: poser une bombe si un joueur est à proximité (aligné)
+        if target_player and (target_player.grid_x == self.grid_x or target_player.grid_y == self.grid_y):
+            distance = abs(target_player.grid_x - self.grid_x) + abs(target_player.grid_y - self.grid_y)
+            if distance <= self.bomb_power:
+                # Vérifier qu'il n'y a pas d'obstacles
+                blocked = False
+                if target_player.grid_x == self.grid_x:  # Même colonne
+                    step = 1 if target_player.grid_y > self.grid_y else -1
+                    for check_y in range(self.grid_y + step, target_player.grid_y, step):
+                        if game.grid[check_y][self.grid_x] in [TileType.WALL, TileType.BLOCK]:
+                            blocked = True
+                            break
+                else:  # Même ligne
+                    step = 1 if target_player.grid_x > self.grid_x else -1
+                    for check_x in range(self.grid_x + step, target_player.grid_x, step):
+                        if game.grid[self.grid_y][check_x] in [TileType.WALL, TileType.BLOCK]:
+                            blocked = True
+                            break
+
+                if not blocked:
+                    # Vérifier si on a une voie d'évacuation
+                    escape_path = self.find_escape_path(game)
+                    if escape_path:
+                        if self.place_bomb(game):
+                            self.bomb_cooldown = random.randint(5, 15)
+                            return True
+
+        # 2. Mode destructeur: poser une bombe pour détruire des blocs et accéder à des zones
+        # Vérifier s'il y a des blocs destructibles adjacents
+        blocks_near = False
+        for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+            nx, ny = self.grid_x + dx, self.grid_y + dy
+            if 0 <= nx < GRID_WIDTH and 0 <= ny < GRID_HEIGHT:
+                if game.grid[ny][nx] == TileType.BLOCK:
+                    blocks_near = True
+                    break
+
+        if blocks_near and current_danger <= 3:  # Ne pas poser si déjà en danger
+            # S'assurer qu'on a un chemin de fuite
+            escape_path = self.find_escape_path(game)
+            if escape_path and random.random() < 0.7:  # 70% de chance de poser une bombe
+                if self.place_bomb(game):
+                    self.bomb_cooldown = random.randint(15, 30)
+                    return True
+
+        return False
 
     def make_ai_decision(self, game):
-        # Simuler un "cerveau" qui pense comme un joueur humain
-
+        """Prend une décision pour le prochain mouvement de l'IA"""
         # Mettre à jour les variables de temps
         self.game_time = game.game_time if hasattr(game, 'game_time') else 0
 
@@ -422,33 +657,10 @@ class AIPlayer:
             # Priorité absolue à l'évitement
             self.strategy_mode = "escape"
 
-            # Trouver la position sûre la plus proche
-            safe_position = self.find_safest_position(game)
-
-            if safe_position:
-                path = self.find_path_to_position(safe_position[0], safe_position[1], game, avoid_danger=False)
-                if path and len(path) > 1:
-                    next_x, next_y = path[1]
-                    dx = 1 if next_x > self.grid_x else -1 if next_x < self.grid_x else 0
-                    dy = 1 if next_y > self.grid_y else -1 if next_y < self.grid_y else 0
-                    self.current_direction = (dx, dy)
-                    self.x += dx * self.speed
-                    self.y += dy * self.speed
-                    return
-
-            # Si aucun chemin sûr n'est trouvé, essayer de s'éloigner des bombes
-            escape_directions = []
-            for direction in [(0, -1), (1, 0), (0, 1), (-1, 0)]:
-                test_x = self.grid_x + direction[0]
-                test_y = self.grid_y + direction[1]
-                if self.can_move_to(test_x, test_y, game):
-                    danger = self.calculate_danger_level(test_x, test_y, game)
-                    escape_directions.append((danger, direction))
-
-            if escape_directions:
-                # Trier par niveau de danger croissant
-                escape_directions.sort()
-                self.current_direction = escape_directions[0][1]
+            # Essayer d'échapper au danger avec la stratégie d'évasion
+            escaped = self.strategies.execute_escape_strategy(game)
+            if escaped:
+                # Exécuter le mouvement après avoir décidé la direction
                 dx, dy = self.current_direction
                 self.x += dx * self.speed
                 self.y += dy * self.speed
@@ -458,17 +670,22 @@ class AIPlayer:
         if self.decision_cooldown > 0:
             self.decision_cooldown -= 1
         else:
-            self.decision_cooldown = random.randint(3, 10)  # Très réactif
+            self.decision_cooldown = random.randint(3, 10)  # Réactif mais pas frénétique
 
             # Stratégie basée sur le mode actuel
             if self.strategy_mode == "hunt":
-                self.execute_hunt_strategy(game)
+                self.strategies.execute_hunt_strategy(game)
             elif self.strategy_mode == "collect":
-                self.execute_collect_strategy(game)
+                self.strategies.execute_collect_strategy(game)
             elif self.strategy_mode == "trap":
-                self.execute_trap_strategy(game)
-            else:  # fallback ou "escape" continué
-                self.execute_hunt_strategy(game)  # Default to hunting
+                self.strategies.execute_trap_strategy(game)
+            elif self.strategy_mode == "escape":
+                # Si on était en mode échappement mais plus en danger, revenir au mode chasse
+                if not current_position_dangerous:
+                    self.reevaluate_strategy(game)
+                    self.strategies.execute_hunt_strategy(game)  # Par défaut: chasser
+                else:
+                    self.strategies.execute_escape_strategy(game)
 
         # ÉTAPE 3: Gestion des bombes selon la stratégie
         self.manage_bombs(game)
@@ -518,194 +735,19 @@ class AIPlayer:
                 top_n = min(3, len(possible_directions))
                 selected_index = 0 if top_n == 1 else random.randint(0, min(2, top_n - 1))
                 self.current_direction = possible_directions[selected_index][1]
+
+                # Déplacer l'IA dans la nouvelle direction
+                dx, dy = self.current_direction
+                self.x += dx * self.speed
+                self.y += dy * self.speed
             else:
                 # Aucune direction n'est possible, rester sur place
                 if self.active_bombs < self.max_bombs and random.random() < 0.6:
                     self.place_bomb(game)
 
-
-    def execute_hunt_strategy(self, game):
-        """Exécute la stratégie de chasse: poursuivre un joueur actif"""
-        target = self.find_target_player(game)
-        if target:
-            path = self.find_path_to_target(target.grid_x, target.grid_y, game)
-            if path and len(path) > 1:
-                next_x, next_y = path[1]
-                dx = 1 if next_x > self.grid_x else -1 if next_x < self.grid_x else 0
-                dy = 1 if next_y > self.grid_y else -1 if next_y < self.grid_y else 0
-                self.current_direction = (dx, dy)
-            else:
-                # Pas de chemin, approche directe
-                dx = 1 if target.grid_x > self.grid_x else -1 if target.grid_x < self.grid_x else 0
-                dy = 1 if target.grid_y > self.grid_y else -1 if target.grid_y < self.grid_y else 0
-
-                # Si les deux axes sont non-nuls, en choisir un
-                if dx != 0 and dy != 0:
-                    if abs(target.grid_x - self.grid_x) > abs(target.grid_y - self.grid_y):
-                        dy = 0  # Prioriser l'axe horizontal
-                    else:
-                        dx = 0  # Prioriser l'axe vertical
-
-                self.current_direction = (dx, dy)
-
-
-    def execute_trap_strategy(self, game):
-        """Exécute la stratégie de piège: poser des bombes de manière stratégique pour piéger les joueurs"""
-        # Vérifier si on peut placer un piège
-        if self.trap_cooldown > 0 or self.active_bombs >= self.max_bombs:
-            # Passer temporairement en mode chasse si on ne peut pas poser de piège
-            self.execute_hunt_strategy(game)
-            return
-
-        # Trouver un joueur cible
-        target = self.find_target_player(game)
-        if not target:
-            # Pas de cible, passer en mode exploration
-            self.execute_collect_strategy(game)
-            return
-
-        # Analyser les mouvements probables du joueur
-        player_probable_positions = []
-        for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
-            px, py = target.grid_x + dx, target.grid_y + dy
-            if 0 <= px < GRID_WIDTH and 0 <= py < GRID_HEIGHT and game.grid[py][px] == TileType.EMPTY:
-                player_probable_positions.append((px, py))
-
-        if not player_probable_positions:
-            # Joueur coincé, attaquer directement
-            self.execute_hunt_strategy(game)
-            return
-
-        # Stratégies de piège
-        trap_strategies = []
-
-        # Stratégie 1: Bloquer une issue
-        for pos in player_probable_positions:
-            # Vérifier si on peut atteindre cette position
-            path = self.find_path_to_position(pos[0], pos[1], game)
-            if path:
-                trap_strategies.append(("block_exit", pos))
-
-        # Stratégie 2: Encerclement - poser des bombes des deux côtés
-        if len(player_probable_positions) <= 2 and self.max_bombs >= 2:
-            trap_strategies.append(("surround", player_probable_positions))
-
-        # Stratégie 3: Anticipation - poser une bombe là où le joueur pourrait aller
-        common_positions = []
-        for pos in player_probable_positions:
-            path = self.find_path_to_position(pos[0], pos[1], game)
-            if path and len(path) <= 3:  # Si on peut y arriver rapidement
-                common_positions.append(pos)
-
-        if common_positions:
-            trap_strategies.append(("anticipate", random.choice(common_positions)))
-
-        if trap_strategies:
-            # Choisir une stratégie
-            strategy, data = random.choice(trap_strategies)
-
-            if strategy == "block_exit":
-                # Aller à cette position pour bloquer
-                pos = data
-                path = self.find_path_to_position(pos[0], pos[1], game)
-                if path and len(path) > 1:
-                    next_x, next_y = path[1]
-                    dx = 1 if next_x > self.grid_x else -1 if next_x < self.grid_x else 0
-                    dy = 1 if next_y > self.grid_y else -1 if next_y < self.grid_y else 0
-                    self.current_direction = (dx, dy)
-
-                    # Si on est adjacent à la position, poser une bombe
-                    if abs(self.grid_x - pos[0]) + abs(self.grid_y - pos[1]) <= 1:
-                        self.place_bomb(game)
-                        self.trap_cooldown = 30  # Attendre avant de poser un autre piège
-
-            elif strategy == "surround":
-                # Tenter d'encercler le joueur
-                positions = data
-                if positions:
-                    pos = positions[0]
-                    path = self.find_path_to_position(pos[0], pos[1], game)
-                    if path and len(path) > 1:
-                        next_x, next_y = path[1]
-                        dx = 1 if next_x > self.grid_x else -1 if next_x < self.grid_x else 0
-                        dy = 1 if next_y > self.grid_y else -1 if next_y < self.grid_y else 0
-                        self.current_direction = (dx, dy)
-
-                        # Si on est proche, poser une bombe
-                        if abs(self.grid_x - pos[0]) + abs(self.grid_y - pos[1]) <= 2:
-                            self.place_bomb(game)
-                            self.trap_cooldown = 20
-
-            elif strategy == "anticipate":
-                # Aller à la position anticipée
-                pos = data
-                path = self.find_path_to_position(pos[0], pos[1], game)
-                if path and len(path) > 1:
-                    next_x, next_y = path[1]
-                    dx = 1 if next_x > self.grid_x else -1 if next_x < self.grid_x else 0
-                    dy = 1 if next_y > self.grid_y else -1 if next_y < self.grid_y else 0
-                    self.current_direction = (dx, dy)
-
-                    # Si on est à la position ou adjacent, poser une bombe
-                    if (self.grid_x == pos[0] and self.grid_y == pos[1]) or \
-                            (abs(self.grid_x - pos[0]) + abs(self.grid_y - pos[1]) <= 1):
-                        self.place_bomb(game)
-                        self.trap_cooldown = 25
-        else:
-            # Pas de stratégie de piège viable, passer en mode chasse
-            self.execute_hunt_strategy(game)
-
-
-    def execute_collect_strategy(self, game):
-        """Exécute la stratégie de collection: aller chercher des power-ups"""
-        if self.known_powerups:
-            # Trouver le power-up le plus proche ou le préféré
-            best_powerup = None
-            best_score = float('-inf')
-
-            for px, py in self.known_powerups:
-                # Distance (plus proche = meilleur)
-                distance = abs(px - self.grid_x) + abs(py - self.grid_y)
-                score = 100 - distance * 10
-
-                # Bonus pour le type préféré
-                tile_type = game.grid[py][px]
-                if (tile_type == TileType.POWER_UP_BOMB and self.powerup_priority == "bomb") or \
-                        (tile_type == TileType.POWER_UP_FLAME and self.powerup_priority == "flame") or \
-                        (tile_type == TileType.POWER_UP_SPEED and self.powerup_priority == "speed"):
-                    score += 30
-
-                # Pénalité si le chemin est dangereux
-                path = self.find_path_to_position(px, py, game)
-                if not path:
-                    score -= 50  # Pénalité si pas de chemin
-                elif len(path) > 1:
-                    next_x, next_y = path[1]
-                    danger = self.calculate_danger_level(next_x, next_y, game)
-                    score -= danger * 5
-
-                if score > best_score:
-                    best_score = score
-                    best_powerup = (px, py)
-
-            if best_powerup:
-                path = self.find_path_to_position(best_powerup[0], best_powerup[1], game)
-                if path and len(path) > 1:
-                    next_x, next_y = path[1]
-                    dx = 1 if next_x > self.grid_x else -1 if next_x < self.grid_x else 0
-                    dy = 1 if next_y > self.grid_y else -1 if next_y < self.grid_y else 0
-                    self.current_direction = (dx, dy)
-                    return
-
-        # Si pas de power-up connu, chercher des blocs à détruire
-        blocks_nearby = []
-        for distance in range(1, 4):  # Chercher des blocs à proximité
-            for dx in range(-distance, distance + 1):
-                for dy in range(-distance, distance + 1):
-                    # Assurer que nous examinons les cases à exactement "distance" de Manhattan
-                    if abs(dx) + abs(dy) != distance:
-                        continue
-
-                    bx, by = self.grid_x + dx, self.grid_y + dy
-                    if 0 <= bx < GRID_WIDTH and 0 <= by < GRID_HEIGHT and game.grid[by][bx] == TileType.BLOCK:
-                        blocks_nearby.append((bx, by))
+    def draw(self, screen, offset_x, offset_y):
+        """Dessine l'IA sur l'écran"""
+        # Dessiner le joueur (un cercle)
+        x_pos = offset_x + self.x
+        y_pos = offset_y + self.y
+        pygame.draw.circle(screen, self.color, (x_pos, y_pos), self.radius)

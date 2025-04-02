@@ -64,17 +64,64 @@ class Player:
             self.place_bomb(game)
 
     def can_move_to(self, grid_x, grid_y, game):
-        # Vérifier si la position est dans les limites
-        if grid_x < 0 or grid_x >= GRID_WIDTH or grid_y < 0 or grid_y >= GRID_HEIGHT:
-            return False
+        """
+        Vérifie si le joueur peut se déplacer vers une position donnée
+        en tenant compte du rayon du cercle qui le représente
+        """
+        # Conversion du rayon en unités de grille
+        radius_in_grid = self.radius / TILE_SIZE
 
-        # Vérifier si la case est libre
-        tile_type = game.grid[grid_y][grid_x]
-        if tile_type in [TileType.WALL, TileType.BLOCK]:
-            return False
+        # Calculer les limites du cercle basées sur la nouvelle position potentielle
+        # Coordonnées du centre en unités de grille
+        center_x = grid_x + 0.5
+        center_y = grid_y + 0.5
+
+        # Points extrêmes du cercle (gauche, droite, haut, bas)
+        left_x = center_x - radius_in_grid
+        right_x = center_x + radius_in_grid
+        top_y = center_y - radius_in_grid
+        bottom_y = center_y + radius_in_grid
+
+        # Convertir les coordonnées en indices de grille
+        left_grid = int(left_x)
+        right_grid = int(right_x)
+        top_grid = int(top_y)
+        bottom_grid = int(bottom_y)
+
+        # Vérifier les cases qui pourraient être en collision avec le cercle
+        for check_x in range(left_grid, right_grid + 1):
+            for check_y in range(top_grid, bottom_grid + 1):
+                # Vérifier si la position est dans les limites de la grille
+                if 0 <= check_x < GRID_WIDTH and 0 <= check_y < GRID_HEIGHT:
+                    tile_type = game.grid[check_y][check_x]
+
+                    # Si c'est un mur ou un bloc, vérifier la collision précise
+                    if tile_type in [TileType.WALL, TileType.BLOCK]:
+                        # Centre de la case obstacle
+                        obstacle_center_x = check_x + 0.5
+                        obstacle_center_y = check_y + 0.5
+
+                        # Distance entre le centre du joueur et le centre de l'obstacle
+                        dx = abs(center_x - obstacle_center_x)
+                        dy = abs(center_y - obstacle_center_y)
+
+                        # Si le cercle du joueur touche la case obstacle
+                        # Coin supérieur gauche: (check_x, check_y), coin inférieur droit: (check_x+1, check_y+1)
+                        # On vérifie la distance minimale entre le centre du cercle et le bord de la case
+
+                        # Pour les obstacles rectangulaires, on calcule la distance au bord le plus proche
+                        closest_x = max(check_x, min(center_x, check_x + 1))
+                        closest_y = max(check_y, min(center_y, check_y + 1))
+
+                        # Distance entre le centre du cercle et le point le plus proche du rectangle
+                        distance = ((center_x - closest_x) ** 2 + (center_y - closest_y) ** 2) ** 0.5
+
+                        # Si cette distance est inférieure au rayon, il y a collision
+                        if distance < radius_in_grid:
+                            return False
 
         # Vérifier s'il y a une bombe
-        if tile_type == TileType.BOMB:
+        if game.grid[grid_y][grid_x] == TileType.BOMB:
             # Vérifier si on est déjà sur une bombe (pour pouvoir en sortir)
             current_on_bomb = game.grid[self.grid_y][self.grid_x] == TileType.BOMB
 
