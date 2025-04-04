@@ -73,28 +73,28 @@ class AIPlayer:
                 "strategy_preference": {"hunt": 0.6, "collect": 0.2, "trap": 0.2},
                 "powerup_priority": "flame",
                 "aggression_level": 0.9,
-                "risk_tolerance": 0.7,
+                "risk_tolerance": 0.4,
                 "path_preference": "direct"
             },
             {  # Collecteur
                 "strategy_preference": {"hunt": 0.3, "collect": 0.6, "trap": 0.1},
                 "powerup_priority": "bomb",
                 "aggression_level": 0.6,
-                "risk_tolerance": 0.4,
+                "risk_tolerance": 0.2,
                 "path_preference": "safe"
             },
             {  # Piégeur
                 "strategy_preference": {"hunt": 0.2, "collect": 0.2, "trap": 0.6},
                 "powerup_priority": "speed",
                 "aggression_level": 0.8,
-                "risk_tolerance": 0.6,
+                "risk_tolerance": 0.3,
                 "path_preference": "tricky"
             },
             {  # Survivant
                 "strategy_preference": {"hunt": 0.4, "collect": 0.4, "trap": 0.2},
                 "powerup_priority": random.choice(["bomb", "flame", "speed"]),
                 "aggression_level": 0.7,
-                "risk_tolerance": 0.5,
+                "risk_tolerance": 0.25,
                 "path_preference": "balanced"
             }
         ]
