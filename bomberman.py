@@ -7,7 +7,6 @@ from explosion import Explosion
 class Bomberman:
     def __init__(self, screen):
         # Initialisation de l'affichage
-        self.screen = screen
         pygame.display.set_caption("Bomberman")
 
         # Calculer le décalage pour centrer le jeu sur l'écran
@@ -104,8 +103,6 @@ class Bomberman:
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
-                if event.key == pygame.K_r:
-                    self.__init__()  # Redémarrer le jeu
 
         # Prise en compte des entrées des joueurs
         if not self.game_over:
