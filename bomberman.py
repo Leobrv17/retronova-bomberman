@@ -7,6 +7,7 @@ from explosion import Explosion
 class Bomberman:
     def __init__(self, screen):
         # Initialisation de l'affichage
+        self.screen=screen
         pygame.display.set_caption("Bomberman")
 
         # Calculer le décalage pour centrer le jeu sur l'écran

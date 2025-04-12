@@ -11,7 +11,7 @@ class Player:
         self.x = grid_x * TILE_SIZE + TILE_SIZE // 2
         self.y = grid_y * TILE_SIZE + TILE_SIZE // 2
         self.color = color
-        self.radius = TILE_SIZE // 2 - 5
+        self.radius = TILE_SIZE // 2 - 8
 
         # Caractéristiques
         self.speed = 3
@@ -47,23 +47,50 @@ class Player:
             dx = self.speed
 
         # Vérifier si le mouvement est valide
-        new_grid_x = (self.x + dx) // TILE_SIZE
-        new_grid_y = (self.y + dy) // TILE_SIZE
-
-        # Mouvement horizontal
-        if dx != 0:
-            if self.can_move_to(new_grid_x, self.grid_y, game):
-                self.x += dx
-        # Mouvement vertical
-        if dy != 0:
-            if self.can_move_to(self.grid_x, new_grid_y, game):
-                self.y += dy
+        if self.can_move(self.x + dx, self.y, game) and dx != 0:
+            self.x += dx
+        if self.can_move(self.x, self.y + dy, game) and dy != 0:
+            self.y += dy
 
         # Placement de bombe
         if keys[self.key_bomb] and self.active_bombs < self.max_bombs:
             self.place_bomb(game)
 
+    def can_move(self, new_x, new_y, game):
+        # Calculer le rayon effectif pour la collision (80% du rayon réel)
+        effective_radius = int(self.radius * 0.6)
+
+        # Vérifier les collisions aux quatre points cardinaux du cercle
+        points_to_check = [
+            (new_x - effective_radius, new_y),  # Point gauche
+            (new_x + effective_radius, new_y),  # Point droit
+            (new_x, new_y - effective_radius),  # Point haut
+            (new_x, new_y + effective_radius)  # Point bas
+        ]
+
+        for point_x, point_y in points_to_check:
+            grid_x = point_x // TILE_SIZE
+            grid_y = point_y // TILE_SIZE
+
+            # Vérifier si le point est en dehors des limites
+            if grid_x < 0 or grid_x >= GRID_WIDTH or grid_y < 0 or grid_y >= GRID_HEIGHT:
+                return False
+
+            # Vérifier si le point touche un mur ou un bloc
+            tile_type = game.grid[grid_y][grid_x]
+            if tile_type in [TileType.WALL, TileType.BLOCK]:
+                return False
+
+            # Vérifier s'il y a une bombe (sauf celle qu'on vient de poser)
+            if tile_type == TileType.BOMB:
+                for bomb in game.bombs:
+                    if bomb.x == grid_x and bomb.y == grid_y and not bomb.just_placed:
+                        return False
+
+        return True
+
     def can_move_to(self, grid_x, grid_y, game):
+        # Cette méthode n'est plus utilisée directement, mais on la garde pour compatibilité
         # Vérifier si la position est dans les limites
         if grid_x < 0 or grid_x >= GRID_WIDTH or grid_y < 0 or grid_y >= GRID_HEIGHT:
             return False
