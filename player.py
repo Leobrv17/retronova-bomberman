@@ -1,6 +1,7 @@
 from bomb import Bomb
 import pygame
 from contantes import *
+import math
 
 
 class Player:
@@ -57,7 +58,7 @@ class Player:
             self.place_bomb(game)
 
     def can_move(self, new_x, new_y, game):
-        # Calculer le rayon effectif pour la collision (80% du rayon réel)
+        # Calculer le rayon effectif pour la collision (60% du rayon réel)
         effective_radius = int(self.radius * 0.6)
 
         # Vérifier les collisions aux quatre points cardinaux du cercle
@@ -83,9 +84,23 @@ class Player:
 
             # Vérifier s'il y a une bombe (sauf celle qu'on vient de poser)
             if tile_type == TileType.BOMB:
+                # Vérifier si le joueur est déjà sur cette case (pour permettre de sortir de sa propre bombe)
+                if self.grid_x == grid_x and self.grid_y == grid_y:
+                    continue
+
+                # Sinon, vérifier la collision avec le corps de la bombe
                 for bomb in game.bombs:
-                    if bomb.x == grid_x and bomb.y == grid_y and not bomb.just_placed:
-                        return False
+                    if bomb.x == grid_x and bomb.y == grid_y:
+                        # Calculer le centre de la bombe
+                        bomb_center_x = (bomb.x * TILE_SIZE) + (TILE_SIZE // 2)
+                        bomb_center_y = (bomb.y * TILE_SIZE) + (TILE_SIZE // 2)
+
+                        # Calculer la distance entre le joueur et la bombe
+                        distance = math.sqrt((new_x - bomb_center_x) ** 2 + (new_y - bomb_center_y) ** 2)
+
+                        # Si la distance est inférieure à la somme des rayons, il y a collision
+                        if distance < (self.radius * 0.6 + bomb.radius * 0.8):
+                            return False
 
         return True
 
